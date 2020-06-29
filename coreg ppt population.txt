@@ -1,0 +1,240 @@
+--scripted by Taylor Hoyt
+--this macro loads OCT images into a powerpoint file, followed by histology images with coregistration documented in an Excel file
+--slide dimensions on this machine are approximately 540h x 720w points
+
+set vesselName to "HH5 LAD"
+set folderPrefix to "Macintosh HD:Users:Taylor:"
+set histoHEPath to "Documents:HH data:HH5:histology:12-159:ring scans LAD - HE:"
+set histoMovatPath to "Documents:HH data:HH5:histology:12-159:ring scans LAD - Movat:"
+set excelPath to "Documents:HH data:HH5:HH5 LAD bs_ave_scaled_borders (dv_8May2013).xlsx"
+set excelSheet to "LAD bright spots"
+set excelRange to "k5:k304"
+set unprocessedPath to "Documents:HH data:HH5:LAD VL2 (fresh):Frame_"
+set NSDPath to "Documents:HH data:HH5:bright spots:LAD:NSD:NSD_ave_scaled"
+set ave_scaledPath to "Desktop:Bright Spot Corrections:5_LAD:bs_ave_scaled_borders"
+set startingFrame to 34
+set endingFrame to 271
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+--function for collecting files from a folder and putting their names into a list
+on tabulateHistology(emptyList, prefix, pathway)
+	tell application "Finder"
+		set numberOfFiles to count of (files in container (prefix & pathway) whose name extension is "JPG")
+		repeat with i1 from 1 to numberOfFiles
+			set emptyList to emptyList & {name of item i1 of entire contents of container (prefix & pathway)}
+		end repeat
+	end tell
+	emptyList
+end tabulateHistology
+
+--make two lists with the names of the histology files
+set histoHEList to {}
+set histoMovatList to {}
+set histoHEList to tabulateHistology(histoHEList, folderPrefix, histoHEPath)
+set histoMovatList to tabulateHistology(histoMovatList, folderPrefix, histoMovatPath)
+
+--extract the coregistration from an Excel file as a list, each item is a list containing all histological matches to that frame
+tell application "Microsoft Excel"
+	open folderPrefix & excelPath
+	tell workbook 1
+		tell sheet excelSheet
+			set coregList to string value of range excelRange --[I want to make these two lines of code into one, but can't for some reason.]
+			set coregList to reverse of coregList
+		end tell
+	end tell
+end tell
+
+on parseCommas(i2, j2, theList)
+	set item i2 of theList to {(item 1 of item i2 of theList), "", ""}
+	set theItem to item j2 of item i2 of theList
+	set theComma to offset of "," in theItem
+	if theItem is "" then
+		return item i2 of theList
+	else
+		if theComma is 0 then
+			return item i2 of theList
+		else
+			set item (j2 + 1) of item i2 of theList to text (theComma + 2) thru -1 of theItem
+			set item j2 of item i2 of theList to text 1 thru (theComma - 1) of theItem
+			parseCommas(i2, j2 + 1, theList)
+		end if
+	end if
+end parseCommas
+
+repeat with i6 from 1 to count of coregList
+	set item i6 of coregList to parseCommas(i6, 1, coregList)
+end repeat
+
+--function for finding the file in one of the histology lists which matches an item in coregList
+on locatedFile(theName, theFileList, cutoff)
+	set i3 to 1
+	repeat while (offset of theName in (item i3 of theFileList)) is 0
+		set i3 to i3 + 1
+	end repeat
+	((characters 1 thru cutoff of item i3 of theFileList) as string)
+end locatedFile
+
+--format the above coregistration list to give it consistent nomenclature and call "locatedFile"
+set numberOfCoregs to count of coregList
+repeat with i4 from 1 to 3
+	repeat with j4 from 1 to numberOfCoregs
+		set incorrectSuffix to item i4 of item j4 of coregList
+		if length of incorrectSuffix is 0 then
+		else
+			if incorrectSuffix is "more" then
+			else
+				if (length of incorrectSuffix is 1) or (length of incorrectSuffix is 2) then
+					set incorrectSuffix to " " & incorrectSuffix & "-L1"
+					try
+						set item i4 of item j4 of coregList to locatedFile(incorrectSuffix, histoHEList, -5)
+					on error
+						try
+							set item i4 of item j4 of coregList to locatedFile(incorrectSuffix, histoMovatList, -11)
+						end try
+					end try
+				else
+					set placeholderSuffix to every character of incorrectSuffix
+					set item ((offset of "L" in incorrectSuffix) - 1) of placeholderSuffix to "-"
+					set incorrectSuffix to " " & (placeholderSuffix as string)
+					try
+						set item i4 of item j4 of coregList to locatedFile(incorrectSuffix, histoHEList, -5)
+					on error
+						try
+							set item i4 of item j4 of coregList to locatedFile(incorrectSuffix, histoMovatList, -11)
+						end try
+					end try
+				end if
+			end if
+		end if
+	end repeat
+end repeat
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+--function to put a textbox on the slide
+on insertTextbox(boxName, thisPresentation, thisSlide, boxContent, leftPosition, theTop, theHeight, theWidth)
+	tell application "Microsoft PowerPoint"
+		tell presentation thisPresentation
+			tell slide thisSlide
+				make new shape at end with properties {name:boxName}
+				set content of text range of text frame of shape boxName to boxContent
+				set fore color of line format of shape boxName to ({0, 0, 0} as RGB color)
+				set transparency of line format of shape boxName to 1
+				set transparency of fill format of shape boxName to 1
+				set font color of font of text range of text frame of shape boxName to ({0, 0, 0} as RGB color)
+				tell shape boxName
+					set left position to leftPosition
+					set top to theTop
+					set height to theHeight
+					set width to theWidth
+				end tell
+			end tell
+		end tell
+	end tell
+end insertTextbox
+
+--function to put a picture on the slide
+on insertPicture(pictureName, thisPresentation, thisSlide, imageLocation, leftPosition, theTop, theWidth, theRotation)
+	tell application "Microsoft PowerPoint"
+		tell presentation thisPresentation
+			tell slide thisSlide
+				make new shape at end with properties {name:pictureName, shape type:shape type picture, save with document:true}
+				user picture shape pictureName picture file imageLocation
+				set transparency of line format of shape pictureName to 1
+				tell shape pictureName
+					set lock aspect ratio to true
+					set left position to leftPosition
+					set top to theTop
+					set width to theWidth
+					set rotation to theRotation
+					--set crop bottom of picture format of shape pictureName to 23 -- [why does this command not work?]
+					(*set crop top to 23
+					set crop left to 23
+					set crop right to 23*)
+				end tell
+			end tell
+		end tell
+	end tell
+end insertPicture
+
+--function to put a scale bar on the slide
+on insertLine(lineName, thisPresentation, thisSlide, scaleColor, leftPosition, theTop, theWidth)
+	tell application "Microsoft PowerPoint"
+		tell presentation thisPresentation
+			tell slide thisSlide
+				make new shape at end with properties {name:lineName, shape type:shape type line}
+				set fore color of line format of shape lineName to (scaleColor as RGB color)
+				set line weight of line format of shape lineName to 1
+				tell shape lineName
+					set left position to leftPosition
+					set top to theTop
+					set height to 0
+					set width to theWidth
+				end tell
+			end tell
+		end tell
+	end tell
+end insertLine
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+--make 300 PowerPoint slides with the unprocessed OCT, scaled OCT, ave_scaled OCT, H&E and Movat coregistration (if applicable) and a label
+tell application "Microsoft PowerPoint"
+	make new presentation
+	set currentPresentation to name of active presentation
+	tell presentation currentPresentation
+		make new slide at end
+		tell slide 1
+			set layout to slide layout title slide
+			set content of text range of text frame of shape 1 to vesselName & " coregistration"
+			set content of text range of text frame of shape 2 to "All scale bars are set to 1mm"
+		end tell
+		
+		repeat with i5 from startingFrame to endingFrame
+			make new slide at end
+			tell slide (i5 - startingFrame + 2)
+				set layout to slide layout blank
+				my insertTextbox("slideLabel", currentPresentation, (i5 - startingFrame + 2), ("frame: " & i5), 490, 280, 100, 220)
+				set digits to ""
+				if i5 < 10 then
+					set digits to "00"
+				end if
+				if (i5 > 9 and i5 < 100) then
+					set digits to "0"
+				end if
+				my insertPicture("unprocessed", currentPresentation, (i5 - startingFrame + 2), (folderPrefix & unprocessedPath & digits & i5 & ".jpg"), 0, 0, 240, 0)
+				my insertPicture("NSD", currentPresentation, (i5 - startingFrame + 2), (folderPrefix & NSDPath & i5 & ".tif"), 240, 0, 240, -90)
+				my insertPicture("ave_scaled", currentPresentation, (i5 - startingFrame + 2), (folderPrefix & ave_scaledPath & i5 & ".tif"), 480, 0, 240, -90)
+				my insertLine("unprocessedBar", currentPresentation, (i5 - startingFrame + 2), {255, 255, 0}, 0, 210, 38)
+				--my insertLine("scaledBar", currentPresentation, (i5 - startingFrame + 2), {255, 255, 0}, 240, 210, 25)
+				my insertLine("ave_scaledBar", currentPresentation, (i5 - startingFrame + 2), {255, 255, 0}, 480, 210, 25)
+				my insertTextbox("unprocessedLabel", currentPresentation, (i5 - startingFrame + 2), "unprocessed", 0, 240, 30, 240)
+				my insertTextbox("NSDLabel", currentPresentation, (i5 - startingFrame + 2), "NSD", 240, 240, 30, 240)
+				my insertTextbox("ave_scaledLabel", currentPresentation, (i5 - startingFrame + 2), "ave_scaled", 480, 240, 30, 240)
+				
+				repeat with j5 from 1 to 3
+					set fileName to item j5 of item i5 of coregList
+					if fileName is not "" then
+						my insertPicture(("H&E" & j5), currentPresentation, (i5 - startingFrame + 2), (folderPrefix & histoHEPath & fileName & ".JPG"), 0, 270, 240, 0)
+						my insertPicture(("Movat" & j5), currentPresentation, (i5 - startingFrame + 2), (folderPrefix & histoMovatPath & fileName & " Movat.JPG"), 240, 270, 240, 0)
+						
+						if j5 is 1 then
+							my insertLine("H&EBar", currentPresentation, (i5 - startingFrame + 2), {0, 0, 0}, 0, 480, 48)
+							my insertLine("MovatBar", currentPresentation, (i5 - startingFrame + 2), {0, 0, 0}, 240, 480, 48)
+							my insertTextbox("H&ELabel", currentPresentation, (i5 - startingFrame + 2), "H & E", 0, 510, 30, 240)
+							my insertTextbox("MovatLabel", currentPresentation, (i5 - startingFrame + 2), "Movat", 240, 510, 30, 240)
+						end if
+						
+						set previousContent to content of text range of text frame of shape "slideLabel"
+						set content of text range of text frame of shape "slideLabel" to previousContent & "
+histo: " & fileName
+					end if
+				end repeat
+			end tell
+		end repeat
+	end tell
+	--save presentation currentPresentation
+end tell
+
+beep
